@@ -1,0 +1,38 @@
+{
+  "agent": {
+    "status": "idle",
+    "current_task_id": null,
+    "last_active": "2026-03-30T23:21:23+00:00",
+    "current_action": "System initialized",
+    "paused_tasks": 0
+  },
+  "projects": {},
+  "tasks": {},
+  "crons": {
+    "c4c07289-e3ec-4fd2-b636-ccbb0efb09fe": {
+      "name": "Daily Internship Scraper",
+      "schedule": "0 17 * * *",
+      "timezone": "America/New_York",
+      "last_run": "2026-03-30T21:00:00+00:00",
+      "last_status": "ok",
+      "next_run": "2026-03-31T21:00:00+00:00",
+      "target": "isolated",
+      "agent_id": "main",
+      "history": ["ok", "ok", "ok", "ok", "ok", "ok", "ok", "ok", "ok", "ok"]
+    },
+    "080dd6fd-ba72-49bf-847d-60a0e341e2f8": {
+      "name": "Fall 2026 Co-op Watchlist",
+      "schedule": "0 9 * * 1,4",
+      "timezone": "America/New_York",
+      "last_run": "2026-03-30T13:00:00+00:00",
+      "last_status": "ok",
+      "next_run": "2026-04-02T13:00:00+00:00",
+      "target": "isolated",
+      "agent_id": "main",
+      "history": ["ok", "ok", "ok", "ok", "ok", "ok", "ok", "ok", "ok", "ok"]
+    }
+  },
+  "activity_log": [
+    { "timestamp": "2026-03-30T23:21:23+00:00", "level": "info", "message": "Mission Control initialized" }
+  ]
+}
