@@ -798,34 +798,33 @@ function demoAction(status,action){
 /* === TEAM === */
 function renderTeam(S){
   const ag=S.agent||{};
-  const agents=S.agents||{};
-  const agentKeys=Object.keys(agents);
-
-  let h='';
-  // Featured: Jarvis
-  h+='<div class="team-featured"><div class="team-avatar main">J</div><div class="team-info"><h3>Jarvis</h3><p>Primary Agent — Orchestrator</p>';
-  h+='<div style="margin-top:6px">'+statusBadge(ag.status||'idle')+' <span class="role-tag">Orchestrator</span></div>';
-  h+='<div class="team-stats"><div class="team-stat"><label>Status</label>'+esc(ag.current_action||'Idle')+'</div>';
-  h+='<div class="team-stat"><label>Last Active</label>'+relTime(ag.last_active)+'</div></div>';
-  h+='</div></div>';
-
-  // Agent roster
-  if(agentKeys.length){
-    h+='<h3 style="font-size:14px;margin-bottom:12px">Sub-Agents</h3><div class="team-grid">';
+  fetch('/agents').then(r=>r.json()).then(agents=>{
     const colors=['#7c3aed','#14b8a6','#f97316','#ef4444','#22c55e','#eab308'];
-    let ci=0;
-    for(const k of agentKeys){
-      const a=agents[k];
-      const color=colors[ci%colors.length];ci++;
-      const initial=(a.name||k).charAt(0).toUpperCase();
-      h+='<div class="agent-card"><div class="agent-avatar" style="background:'+color+'">'+initial+'</div><div class="agent-info"><h4>'+esc(a.name||k)+'</h4>';
-      h+='<p>'+statusBadge(a.status||'idle')+' <span class="role-tag">'+esc(a.role||'Agent')+'</span></p>';
-      h+='<p>Last active: '+relTime(a.last_active)+'</p></div></div>'}
-    h+='</div>';
-  } else {
-    h+='<div style="margin-top:16px;padding:20px;text-align:center;color:var(--muted);font-size:12px;background:var(--surface);border:1px solid var(--border);border-radius:8px">No sub-agents spawned. Jarvis is operating solo.</div>';
-  }
-  document.getElementById('teamContent').innerHTML=h;
+    let h='';
+    // Featured: Jarvis
+    h+='<div class="team-featured"><div class="team-avatar main">J</div><div class="team-info"><h3>Jarvis</h3><p>Primary Agent — Orchestrator</p>';
+    h+='<div style="margin-top:6px">'+statusBadge(ag.status||'idle')+' <span class="role-tag">Orchestrator</span></div>';
+    h+='<div class="team-stats"><div class="team-stat"><label>Status</label>'+esc(ag.current_action||'Idle')+'</div>';
+    h+='<div class="team-stat"><label>Last Active</label>'+relTime(ag.last_active)+'</div></div>';
+    h+='</div></div>';
+
+    if(agents.length){
+      h+='<h3 style="font-size:14px;margin-bottom:12px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">Agents</h3><div class="team-grid">';
+      agents.forEach((a,i)=>{
+        const color=colors[i%colors.length];
+        const initial=a.name.charAt(0).toUpperCase();
+        h+='<div class="agent-card"><div class="agent-avatar" style="background:'+color+'">'+initial+'</div>';
+        h+='<div class="agent-info"><h4>'+esc(a.name)+'</h4>';
+        h+='<p style="color:var(--muted);font-size:11px;margin:2px 0">'+esc(a.role)+'</p>';
+        if(a.description) h+='<p style="color:var(--muted);font-size:10px;margin-top:4px">'+esc(a.description.substring(0,80))+'...</p>';
+        h+='</div></div>';
+      });
+      h+='</div>';
+    } else {
+      h+='<div style="margin-top:16px;padding:20px;text-align:center;color:var(--muted);font-size:12px;background:var(--surface);border:1px solid var(--border);border-radius:8px">No agents found in workspace/agents/.</div>';
+    }
+    document.getElementById('teamContent').innerHTML=h;
+  }).catch(()=>{document.getElementById('teamContent').innerHTML='<div style="color:var(--red)">Failed to load agents</div>';});
 }
 
 /* === PROJECTS === */
@@ -1062,6 +1061,47 @@ PROJECTS_DIR = WORKSPACE / "projects"
 CORE_FILES = ["MEMORY.md", "SOUL.md", "AGENTS.md", "USER.md", "HEARTBEAT.md", "IDENTITY.md", "TOOLS.md"]
 
 
+def scan_agents() -> list:
+    """Scan workspace/agents/ and return metadata for each agent."""
+    agents_dir = WORKSPACE / "agents"
+    if not agents_dir.is_dir():
+        return []
+    agents = []
+    for agent_dir in sorted(agents_dir.iterdir()):
+        if not agent_dir.is_dir():
+            continue
+        agent_md = agent_dir / "AGENT.md"
+        name = agent_dir.name.capitalize()
+        role = "Agent"
+        description = ""
+        if agent_md.exists():
+            content = agent_md.read_text(errors="replace")
+            # Extract name from first H1
+            for line in content.splitlines():
+                if line.startswith("# "):
+                    name = line[2:].strip().split("—")[0].strip()
+                    break
+            # Extract role
+            for line in content.splitlines():
+                if line.startswith("- **Role:**"):
+                    role = line.split("**Role:**")[1].strip()
+                    break
+            # First non-empty paragraph after frontmatter as description
+            lines = content.splitlines()
+            for i, line in enumerate(lines):
+                if line.startswith("You are ") or line.startswith("**"):
+                    description = line[:120]
+                    break
+        agents.append({
+            "slug": agent_dir.name,
+            "name": name,
+            "role": role,
+            "description": description,
+            "has_agent_md": agent_md.exists(),
+        })
+    return agents
+
+
 def scan_projects() -> list:
     """Scan workspace/projects/ and return metadata for each project."""
     if not PROJECTS_DIR.is_dir():
@@ -1255,6 +1295,11 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     self._headers(200, "text/plain; charset=utf-8")
                     self.wfile.write(resolved.read_bytes())
+
+        elif self.path == "/agents":
+            agents = scan_agents()
+            self._headers(200)
+            self.wfile.write(json.dumps(agents, indent=2).encode())
 
         elif self.path == "/projects":
             projects = scan_projects()
