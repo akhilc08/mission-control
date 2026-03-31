@@ -241,12 +241,39 @@ tr:hover td{background:rgba(124,58,237,.04)}
 .role-tag{font-size:9px;padding:2px 6px;border-radius:3px;background:var(--surface2);color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
 
 /* ===== PROJECTS ===== */
-.project-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
-.project-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:16px}
-.project-card h3{font-size:14px;font-weight:700;margin-bottom:6px}
-.project-card .desc{font-size:11px;color:var(--muted);margin:8px 0}
-.project-card .note{font-size:11px;color:var(--muted);font-style:italic;margin-top:8px;padding-top:8px;border-top:1px solid var(--border)}
-.project-meta{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+.project-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px}
+.project-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:16px;transition:border-color .15s}
+.project-card:hover{border-color:rgba(124,58,237,.3)}
+.project-card .proj-slug{font-family:'JetBrains Mono','Fira Code','SF Mono',monospace;font-size:13px;font-weight:700;color:var(--text)}
+.project-card .proj-name{font-size:11px;color:var(--muted);margin-top:2px;margin-bottom:8px}
+.project-meta{display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
+.badge-blue{background:rgba(59,130,246,.15);color:#3b82f6}
+.project-card .proj-phase{font-size:11px;color:var(--muted);font-style:italic;margin-top:8px}
+.project-card .proj-updated{font-size:10px;color:var(--muted);margin-top:4px}
+.proj-open-btn{background:var(--surface2);border:1px solid var(--border);color:var(--muted);padding:4px 12px;border-radius:4px;font-size:10px;font-family:inherit;cursor:pointer;transition:all .15s;font-weight:600;margin-left:auto}
+.proj-open-btn:hover{border-color:var(--accent);color:var(--accent)}
+.proj-file-viewer{margin-top:12px;border-top:1px solid var(--border);padding-top:12px}
+.proj-tabs{display:flex;gap:4px;margin-bottom:10px}
+.proj-tab{background:var(--surface2);border:1px solid var(--border);color:var(--muted);padding:4px 10px;border-radius:4px;font-size:10px;font-family:inherit;cursor:pointer;font-weight:600;transition:all .15s}
+.proj-tab:hover{border-color:var(--accent);color:var(--text)}
+.proj-tab.active{background:rgba(124,58,237,.15);border-color:var(--accent);color:var(--accent)}
+.proj-tab:disabled{opacity:.3;cursor:not-allowed}
+.proj-file-content{background:#0d0d17;border-radius:6px;padding:14px 16px;min-height:120px;max-height:400px;overflow:auto;font-size:12px;line-height:1.6}
+.proj-file-content h1{font-size:18px;font-weight:700;margin:12px 0 6px;color:var(--text);border-bottom:1px solid var(--border);padding-bottom:4px}
+.proj-file-content h2{font-size:15px;font-weight:700;margin:10px 0 4px;color:var(--text)}
+.proj-file-content h3{font-size:13px;font-weight:600;margin:8px 0 4px;color:var(--text)}
+.proj-file-content p{margin:4px 0}
+.proj-file-content ul,.proj-file-content ol{padding-left:18px;margin:4px 0}
+.proj-file-content li{margin:2px 0}
+.proj-file-content code{background:var(--surface2);padding:1px 4px;border-radius:3px;font-family:'JetBrains Mono','Fira Code',monospace;font-size:11px}
+.proj-file-content pre{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:10px;margin:6px 0;overflow-x:auto}
+.proj-file-content pre code{background:none;padding:0}
+.proj-file-content blockquote{border-left:3px solid var(--accent);padding-left:10px;color:var(--muted);margin:6px 0}
+.proj-file-content strong{color:var(--text);font-weight:700}
+.proj-file-content em{color:var(--muted)}
+.proj-file-content table{width:100%;border-collapse:collapse;font-size:11px;margin:6px 0}
+.proj-file-content th,.proj-file-content td{padding:4px 8px;border:1px solid var(--border);text-align:left}
+.proj-file-content th{background:var(--surface);color:var(--muted);font-weight:600;font-size:10px;text-transform:uppercase}
 
 /* ===== RUNS ===== */
 .run-status-row td{transition:background .15s}
@@ -436,6 +463,7 @@ const panelTitles={tasks:'Tasks Board',calendar:'Calendar',memory:'Memory Files'
 function switchPanel(id){
   currentPanel=id;
   if(id==='memory')memFilesLoaded=false;
+  if(id==='projects')projectsLoaded=false;
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active',n.dataset.panel===id));
   document.querySelectorAll('.panel-view').forEach(p=>p.classList.toggle('active',p.id==='panel-'+id));
   document.getElementById('panelTitle').textContent=panelTitles[id]||id;
@@ -801,27 +829,170 @@ function renderTeam(S){
 }
 
 /* === PROJECTS === */
-function renderProjects(S){
-  const proj=S.projects||{};
-  const pkeys=Object.keys(proj);
-  if(!pkeys.length){document.getElementById('projectsContent').innerHTML='<div class="empty-state">No active projects</div>';return}
+let projectsData=[];
+let projectsLoaded=false;
+let projExpanded={};  // slug -> true/false
+let projActiveTab={}; // slug -> filename
 
+function renderProjects(S){
+  if(!projectsLoaded){projectsLoaded=true;projLoadProjects()}
+}
+
+function projLoadProjects(){
+  fetch('/projects').then(r=>r.json()).then(projects=>{
+    projectsData=projects;
+    projRenderCards();
+  }).catch(()=>{
+    document.getElementById('projectsContent').innerHTML='<div class="empty-state">Error loading projects</div>';
+  });
+}
+
+function projRenderCards(){
+  const projects=projectsData;
+  if(!projects.length){
+    document.getElementById('projectsContent').innerHTML='<div class="empty-state">No projects yet. Projects appear here when Ultron gets to work.</div>';
+    return;
+  }
+  const statusColors={planning:'badge-blue',active:'badge-green',blocked:'badge-red',completed:'badge-muted'};
   let h='<div class="project-grid">';
-  for(const k of pkeys){
-    const p=proj[k];
-    let total=0,done=0;
-    for(const tk of Object.keys(S.tasks||{})){const t=(S.tasks||{})[tk];if(t.project===k||t.project_id===k){total++;if(t.status==='completed'||t.status==='done')done++}}
+  for(const p of projects){
+    const ts=p.task_summary||{};
+    const total=ts.total||0;const done=ts.done||0;const inp=ts.in_progress||0;const blk=ts.blocked||0;
     const pct=total?Math.round(done/total*100):0;
-    const statusColor={active:'badge-green',paused:'badge-yellow',blocked:'badge-red',completed:'badge-muted'};
-    h+='<div class="project-card"><h3>'+esc(p.name||k)+'</h3>';
-    h+='<div class="project-meta"><span class="badge '+(statusColor[p.status]||'badge-purple')+'">'+esc(p.status||'active')+'</span></div>';
-    h+='<div class="progress-bar"><div class="progress-fill" style="width:'+pct+'%"></div></div>';
-    h+='<div style="font-size:11px;color:var(--muted);margin-top:4px">'+done+'/'+total+' tasks ('+pct+'%)</div>';
-    if(p.description)h+='<div class="desc">'+esc(p.description)+'</div>';
-    if(p.note)h+='<div class="note">'+esc(p.note)+'</div>';
-    h+='</div>'}
+    const donePct=total?(done/total*100):0;
+    const inpPct=total?(inp/total*100):0;
+    const blkPct=total?(blk/total*100):0;
+    const expanded=projExpanded[p.slug];
+
+    h+='<div class="project-card" id="proj-card-'+esc(p.slug)+'">';
+    h+='<div style="display:flex;align-items:flex-start;justify-content:space-between">';
+    h+='<div><div class="proj-slug">'+esc(p.slug)+'</div>';
+    h+='<div class="proj-name">'+esc(p.name)+'</div></div>';
+    h+='<button class="proj-open-btn" onclick="projToggle(\''+esc(p.slug)+'\')">'+(expanded?'Close':'Open')+'</button>';
+    h+='</div>';
+
+    h+='<div class="project-meta">';
+    h+='<span class="badge '+(statusColors[p.status]||'badge-purple')+'">'+esc(p.status)+'</span>';
+    if(p.has_prd)h+='<span class="badge badge-muted">PRD</span>';
+    if(p.has_status)h+='<span class="badge badge-muted">STATUS</span>';
+    h+='</div>';
+
+    // Task progress bar (multi-color)
+    if(total>0){
+      h+='<div class="progress-bar" style="height:8px;display:flex;overflow:hidden">';
+      if(donePct>0)h+='<div style="width:'+donePct+'%;background:var(--green);height:100%"></div>';
+      if(inpPct>0)h+='<div style="width:'+inpPct+'%;background:var(--yellow);height:100%"></div>';
+      if(blkPct>0)h+='<div style="width:'+blkPct+'%;background:var(--red);height:100%"></div>';
+      h+='</div>';
+      h+='<div style="font-size:10px;color:var(--muted);margin-top:4px">'+done+'/'+total+' done';
+      if(inp)h+=' &middot; '+inp+' in progress';
+      if(blk)h+=' &middot; '+blk+' blocked';
+      h+='</div>';
+    }
+
+    if(p.current_phase)h+='<div class="proj-phase">Phase: '+esc(p.current_phase)+'</div>';
+    if(p.last_updated)h+='<div class="proj-updated">Updated: '+esc(p.last_updated)+'</div>';
+
+    // Expanded file viewer
+    if(expanded){
+      const tab=projActiveTab[p.slug]||'PRD.md';
+      h+='<div class="proj-file-viewer">';
+      h+='<div class="proj-tabs">';
+      const tabs=['PRD.md','STATUS.md','TASKS.md','NOTES.md'];
+      for(const t of tabs){
+        const active=t===tab?' active':'';
+        h+='<button class="proj-tab'+active+'" onclick="projSwitchTab(\''+esc(p.slug)+'\',\''+t+'\')">'+t.replace('.md','')+'</button>';
+      }
+      h+='</div>';
+      h+='<div class="proj-file-content" id="proj-file-'+esc(p.slug)+'"><div style="color:var(--muted);font-style:italic">Loading...</div></div>';
+      h+='</div>';
+    }
+
+    h+='</div>';
+  }
   h+='</div>';
   document.getElementById('projectsContent').innerHTML=h;
+
+  // Load file content for expanded cards
+  for(const p of projects){
+    if(projExpanded[p.slug]){
+      projLoadFile(p.slug, projActiveTab[p.slug]||'PRD.md');
+    }
+  }
+}
+
+function projToggle(slug){
+  projExpanded[slug]=!projExpanded[slug];
+  if(projExpanded[slug]&&!projActiveTab[slug])projActiveTab[slug]='PRD.md';
+  projRenderCards();
+}
+
+function projSwitchTab(slug,fname){
+  projActiveTab[slug]=fname;
+  projRenderCards();
+}
+
+function projLoadFile(slug,fname){
+  const el=document.getElementById('proj-file-'+slug);
+  if(!el)return;
+  fetch('/projects/'+encodeURIComponent(slug)+'/file?name='+encodeURIComponent(fname))
+  .then(r=>{
+    if(!r.ok)throw new Error('not found');
+    return r.text();
+  })
+  .then(md=>{
+    if(!md.trim()){el.innerHTML='<div style="color:var(--muted);font-style:italic">File not found or empty</div>';return}
+    el.innerHTML=projRenderMd(md);
+  })
+  .catch(()=>{
+    el.innerHTML='<div style="color:var(--muted);font-style:italic">File not found</div>';
+  });
+}
+
+function projRenderMd(md){
+  let html=esc(md);
+  // Tables
+  html=html.replace(/^(\|.+\|)\n(\|[-| :]+\|)\n((?:\|.+\|\n?)*)/gm, function(m,hdr,sep,body){
+    let t='<table><thead><tr>';
+    hdr.split('|').filter(c=>c.trim()).forEach(c=>{t+='<th>'+c.trim()+'</th>'});
+    t+='</tr></thead><tbody>';
+    body.trim().split('\n').forEach(row=>{
+      t+='<tr>';
+      row.split('|').filter(c=>c.trim()).forEach(c=>{t+='<td>'+c.trim()+'</td>'});
+      t+='</tr>';
+    });
+    t+='</tbody></table>';
+    return t;
+  });
+  html=html.replace(/```(\w*)\n([\s\S]*?)```/g,'<pre><code>$2</code></pre>');
+  html=html.replace(/`([^`]+)`/g,'<code>$1</code>');
+  html=html.replace(/^#### (.+)$/gm,'<h4>$1</h4>');
+  html=html.replace(/^### (.+)$/gm,'<h3>$1</h3>');
+  html=html.replace(/^## (.+)$/gm,'<h2>$1</h2>');
+  html=html.replace(/^# (.+)$/gm,'<h1>$1</h1>');
+  html=html.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>');
+  html=html.replace(/\*(.+?)\*/g,'<em>$1</em>');
+  html=html.replace(/^&gt; (.+)$/gm,'<blockquote>$1</blockquote>');
+  html=html.replace(/^---$/gm,'<hr>');
+  html=html.replace(/^- (.+)$/gm,'<li>$1</li>');
+  html=html.replace(/(<li>[\s\S]*?<\/li>)/g,'<ul>$1</ul>');
+  html=html.replace(/<\/ul>\s*<ul>/g,'');
+  html=html.replace(/\[([^\]]+)\]\(([^)]+)\)/g,'<a href="$2">$1</a>');
+  html=html.replace(/\n\n/g,'</p><p>');
+  html='<p>'+html+'</p>';
+  html=html.replace(/<p>\s*(<h[1-4]>)/g,'$1');
+  html=html.replace(/(<\/h[1-4]>)\s*<\/p>/g,'$1');
+  html=html.replace(/<p>\s*(<pre>)/g,'$1');
+  html=html.replace(/(<\/pre>)\s*<\/p>/g,'$1');
+  html=html.replace(/<p>\s*(<ul>)/g,'$1');
+  html=html.replace(/(<\/ul>)\s*<\/p>/g,'$1');
+  html=html.replace(/<p>\s*(<table>)/g,'$1');
+  html=html.replace(/(<\/table>)\s*<\/p>/g,'$1');
+  html=html.replace(/<p>\s*(<hr>)\s*<\/p>/g,'$1');
+  html=html.replace(/<p>\s*(<blockquote>)/g,'$1');
+  html=html.replace(/(<\/blockquote>)\s*<\/p>/g,'$1');
+  html=html.replace(/<p>\s*<\/p>/g,'');
+  return html;
 }
 
 /* === RUNS === */
@@ -871,7 +1042,10 @@ document.getElementById('clock').textContent=new Date().toLocaleString();
 
 /* === SSE === */
 const evtSource=new EventSource("/events");
-evtSource.onmessage=()=>fetch("/state").then(r=>r.json()).then(s=>{STATE=s;renderActivePanel()});
+evtSource.onmessage=()=>{
+  fetch("/state").then(r=>r.json()).then(s=>{STATE=s;renderActivePanel()});
+  if(currentPanel==='projects'){projectsLoaded=false;projLoadProjects()}
+};
 
 /* === Initial load === */
 fetch("/state").then(r=>r.json()).then(s=>{STATE=s;renderActivePanel()});
@@ -884,7 +1058,100 @@ setInterval(()=>{if(currentPanel==='calendar')renderCalendar(STATE)},30000);
 
 
 WORKSPACE = Path.home() / ".openclaw" / "workspace"
+PROJECTS_DIR = WORKSPACE / "projects"
 CORE_FILES = ["MEMORY.md", "SOUL.md", "AGENTS.md", "USER.md", "HEARTBEAT.md", "IDENTITY.md", "TOOLS.md"]
+
+
+def scan_projects() -> list:
+    """Scan workspace/projects/ and return metadata for each project."""
+    if not PROJECTS_DIR.is_dir():
+        return []
+    projects = []
+    for d in sorted(PROJECTS_DIR.iterdir()):
+        if not d.is_dir():
+            continue
+        slug = d.name
+        prd_path = d / "PRD.md"
+        status_path = d / "STATUS.md"
+        tasks_path = d / "TASKS.md"
+
+        # Parse name from PRD.md H1
+        name = slug.replace("-", " ").replace("_", " ").title()
+        if prd_path.exists():
+            try:
+                for line in prd_path.read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if line.startswith("# "):
+                        name = line[2:].strip()
+                        break
+            except Exception:
+                pass
+
+        # Parse STATUS.md
+        status = "planning"
+        current_phase = ""
+        last_updated = ""
+        if status_path.exists():
+            try:
+                for line in status_path.read_text(encoding="utf-8").splitlines():
+                    low = line.lower().strip()
+                    if low.startswith("status:"):
+                        status = low.split(":", 1)[1].strip()
+                    elif low.startswith("current phase:"):
+                        current_phase = line.split(":", 1)[1].strip()
+                    elif low.startswith("last updated:"):
+                        last_updated = line.split(":", 1)[1].strip()
+            except Exception:
+                pass
+
+        # Parse TASKS.md — count rows by status column
+        task_summary = {"total": 0, "done": 0, "in_progress": 0, "blocked": 0}
+        if tasks_path.exists():
+            try:
+                for line in tasks_path.read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if not line.startswith("|") or line.startswith("|--") or line.startswith("| --"):
+                        continue
+                    cols = [c.strip().lower() for c in line.split("|")]
+                    # skip header row
+                    if "status" in cols or "task" in cols:
+                        continue
+                    # Find status-like column values
+                    for c in cols:
+                        if c in ("done", "completed", "complete", "✅"):
+                            task_summary["total"] += 1
+                            task_summary["done"] += 1
+                            break
+                        elif c in ("in_progress", "in progress", "active", "working", "🔄"):
+                            task_summary["total"] += 1
+                            task_summary["in_progress"] += 1
+                            break
+                        elif c in ("blocked", "❌"):
+                            task_summary["total"] += 1
+                            task_summary["blocked"] += 1
+                            break
+                        elif c in ("pending", "todo", "backlog", "planned", "⬜"):
+                            task_summary["total"] += 1
+                            break
+                    else:
+                        # If no recognized status but it looks like a data row (has content)
+                        non_empty = [c for c in cols if c and c != "---"]
+                        if len(non_empty) >= 2:
+                            task_summary["total"] += 1
+            except Exception:
+                pass
+
+        projects.append({
+            "slug": slug,
+            "name": name,
+            "status": status,
+            "current_phase": current_phase,
+            "last_updated": last_updated,
+            "task_summary": task_summary,
+            "has_prd": prd_path.exists(),
+            "has_status": status_path.exists(),
+        })
+    return projects
 
 
 def scan_memory_files() -> list:
@@ -988,6 +1255,35 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     self._headers(200, "text/plain; charset=utf-8")
                     self.wfile.write(resolved.read_bytes())
+
+        elif self.path == "/projects":
+            projects = scan_projects()
+            self._headers(200)
+            self.wfile.write(json.dumps(projects, indent=2).encode())
+
+        elif self.path.startswith("/projects/") and "/file" in self.path:
+            # /projects/<slug>/file?name=PRD.md
+            parts = self.path.split("/")
+            # parts: ['', 'projects', '<slug>', 'file?name=...']
+            slug = parts[2] if len(parts) >= 3 else ""
+            parsed = urlparse(self.path)
+            qs = parse_qs(parsed.query)
+            fname = qs.get("name", [None])[0]
+            allowed = {"PRD.md", "STATUS.md", "TASKS.md", "NOTES.md"}
+            if not fname or fname not in allowed:
+                self._headers(400)
+                self.wfile.write(json.dumps({"error": "invalid file name"}).encode())
+            else:
+                fpath = (PROJECTS_DIR / slug / fname).resolve()
+                if not str(fpath).startswith(str(PROJECTS_DIR.resolve())):
+                    self._headers(403)
+                    self.wfile.write(json.dumps({"error": "access denied"}).encode())
+                elif not fpath.exists():
+                    self._headers(404, "text/plain; charset=utf-8")
+                    self.wfile.write(b"")
+                else:
+                    self._headers(200, "text/plain; charset=utf-8")
+                    self.wfile.write(fpath.read_bytes())
 
         elif self.path == "/events":
             self.send_response(200)
