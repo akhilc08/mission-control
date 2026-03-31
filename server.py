@@ -8,7 +8,10 @@ import subprocess
 import threading
 import time
 from datetime import datetime, timezone, timedelta
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler
+from socketserver import ThreadingMixIn
+class HTTPServer(ThreadingMixIn, __import__('http.server', fromlist=['HTTPServer']).HTTPServer):
+    daemon_threads = True
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -1090,9 +1093,15 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
+    import sys, os
+    # Redirect stdout/stderr to log file when running detached
+    log_path = Path(__file__).parent / "server.log"
+    if not sys.stdout.isatty():
+        sys.stdout = open(log_path, "a", buffering=1)
+        sys.stderr = sys.stdout
     server = HTTPServer(("0.0.0.0", 4242), Handler)
     server.daemon_threads = True
-    print(f"Mission Control running on http://localhost:4242")
+    print(f"[{datetime.now()}] Mission Control running on http://localhost:4242", flush=True)
     server.serve_forever()
 
 
