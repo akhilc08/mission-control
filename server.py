@@ -3,12 +3,14 @@
 
 import json
 import os
+import re
 import subprocess
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 STATE_PATH = Path(__file__).parent / "state.json"
 lock = threading.Lock()
@@ -159,25 +161,52 @@ tr:hover td{background:rgba(124,58,237,.04)}
 .spark-fail{background:var(--red)}
 .spark-none{background:var(--muted);opacity:.3}
 
-/* ===== MEMORY ===== */
-.memory-layout{display:grid;grid-template-columns:200px 1fr;gap:16px;min-height:500px}
-.memory-sidebar{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px}
-.memory-sidebar h4{font-size:11px;color:var(--accent);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px}
-.mem-cat{padding:6px 8px;font-size:11px;color:var(--muted);cursor:pointer;border-radius:4px;margin-bottom:2px}
-.mem-cat:hover{background:var(--surface2);color:var(--text)}
-.mem-cat.active{background:rgba(124,58,237,.15);color:var(--accent)}
-.mem-cat .mem-count{float:right;font-size:10px;opacity:.6}
-.memory-main{display:flex;flex-direction:column;gap:8px}
-.memory-search{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:8px 12px;color:var(--text);font-family:inherit;font-size:12px;width:100%;outline:none}
-.memory-search:focus{border-color:var(--accent)}
-.log-entry{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:12px;cursor:pointer;transition:border-color .15s}
-.log-entry:hover{border-color:var(--accent)}
-.log-header{display:flex;align-items:center;gap:8px;margin-bottom:4px}
-.log-ts{font-size:11px;color:var(--muted)}
-.log-msg{font-size:12px;line-height:1.5}
-.log-expanded{display:none;margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:11px;color:var(--muted);white-space:pre-wrap}
-.log-entry.open .log-expanded{display:block}
-.log-entry.open{border-color:var(--accent)}
+/* ===== MEMORY FILE EXPLORER ===== */
+.memory-layout{display:grid;grid-template-columns:240px 1fr;gap:0;min-height:500px;background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.memory-sidebar{border-right:1px solid var(--border);padding:0;overflow-y:auto}
+.memory-sidebar h4{font-size:10px;color:var(--accent);text-transform:uppercase;letter-spacing:1.5px;padding:14px 14px 8px;margin:0}
+.mem-file{display:flex;align-items:center;gap:8px;padding:8px 14px;font-size:11px;color:var(--muted);cursor:pointer;transition:all .15s;border-left:3px solid transparent}
+.mem-file:hover{background:rgba(124,58,237,.06);color:var(--text)}
+.mem-file.active{background:rgba(124,58,237,.12);color:var(--accent);border-left-color:var(--accent)}
+.mem-file-icon{flex-shrink:0;width:14px;height:14px;opacity:.5}
+.mem-file.active .mem-file-icon{opacity:1}
+.mem-file-info{flex:1;min-width:0}
+.mem-file-name{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mem-file-meta{font-size:9px;color:var(--muted);opacity:.7;margin-top:1px}
+.mem-file-size{font-size:9px;color:var(--muted);flex-shrink:0}
+.memory-main{display:flex;flex-direction:column;min-height:0}
+.mem-editor-header{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid var(--border);background:var(--surface2);gap:8px}
+.mem-editor-title{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mem-editor-modified{font-size:10px;color:var(--muted)}
+.mem-editor-actions{display:flex;gap:6px;align-items:center;flex-shrink:0}
+.mem-toggle-btn{background:var(--surface);border:1px solid var(--border);color:var(--muted);padding:4px 10px;border-radius:4px;font-size:10px;font-family:inherit;cursor:pointer;transition:all .15s;font-weight:600}
+.mem-toggle-btn:hover{border-color:var(--accent);color:var(--text)}
+.mem-toggle-btn.active{background:rgba(124,58,237,.15);border-color:var(--accent);color:var(--accent)}
+.mem-save-btn{background:rgba(34,197,94,.15);border:1px solid rgba(34,197,94,.3);color:var(--green);padding:4px 12px;border-radius:4px;font-size:10px;font-family:inherit;cursor:pointer;font-weight:600;transition:all .15s}
+.mem-save-btn:hover{background:rgba(34,197,94,.25);border-color:var(--green)}
+.mem-save-btn:disabled{opacity:.4;cursor:not-allowed}
+.mem-save-btn.saved{background:rgba(34,197,94,.3);color:var(--green)}
+.mem-unsaved{font-size:10px;color:var(--yellow);font-weight:600}
+.mem-editor-body{flex:1;overflow:auto;position:relative}
+.mem-textarea{width:100%;height:100%;min-height:400px;background:#0d0d17;color:#e2e8f0;border:none;padding:14px 16px;font-family:'JetBrains Mono','Fira Code','SF Mono',monospace;font-size:12px;line-height:1.6;resize:none;outline:none;tab-size:2}
+.mem-textarea::placeholder{color:var(--muted)}
+.mem-preview{padding:16px 20px;font-size:13px;line-height:1.7;color:#e2e8f0;background:#0d0d17;min-height:400px}
+.mem-preview h1{font-size:20px;font-weight:700;margin:16px 0 8px;color:var(--text);border-bottom:1px solid var(--border);padding-bottom:6px}
+.mem-preview h2{font-size:16px;font-weight:700;margin:14px 0 6px;color:var(--text)}
+.mem-preview h3{font-size:14px;font-weight:600;margin:12px 0 4px;color:var(--text)}
+.mem-preview h4{font-size:12px;font-weight:600;margin:10px 0 4px;color:var(--accent)}
+.mem-preview p{margin:6px 0}
+.mem-preview ul,.mem-preview ol{padding-left:20px;margin:6px 0}
+.mem-preview li{margin:3px 0}
+.mem-preview code{background:var(--surface2);padding:1px 5px;border-radius:3px;font-family:'JetBrains Mono','Fira Code',monospace;font-size:11px}
+.mem-preview pre{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:12px;margin:8px 0;overflow-x:auto}
+.mem-preview pre code{background:none;padding:0}
+.mem-preview blockquote{border-left:3px solid var(--accent);padding-left:12px;color:var(--muted);margin:8px 0}
+.mem-preview strong{color:var(--text);font-weight:700}
+.mem-preview em{color:var(--muted)}
+.mem-preview hr{border:none;border-top:1px solid var(--border);margin:12px 0}
+.mem-preview a{color:var(--accent);text-decoration:none}
+.mem-empty-state{display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted);font-size:13px;font-style:italic;padding:40px}
 
 /* ===== OFFICE ===== */
 .office-layout{display:grid;grid-template-columns:1fr 300px;gap:16px;min-height:500px}
@@ -326,11 +355,36 @@ tr:hover td{background:rgba(124,58,237,.04)}
     <div id="calendarContent"></div>
   </div>
 
-  <!-- MEMORY -->
+  <!-- MEMORY FILE EXPLORER -->
   <div class="panel-view" id="panel-memory">
     <div class="memory-layout">
-      <div class="memory-sidebar" id="memorySidebar"></div>
-      <div class="memory-main" id="memoryMain"></div>
+      <div class="memory-sidebar" id="memorySidebar">
+        <h4>Core Files</h4>
+        <div id="memCoreFiles"></div>
+        <h4 style="margin-top:8px">Daily Notes</h4>
+        <div id="memDailyFiles"></div>
+      </div>
+      <div class="memory-main" id="memoryMain">
+        <div class="mem-empty-state" id="memEmptyState">Select a file to view</div>
+        <div id="memEditorWrap" style="display:none;flex:1;display:none;flex-direction:column">
+          <div class="mem-editor-header">
+            <div style="min-width:0">
+              <div class="mem-editor-title" id="memFileName"></div>
+              <div class="mem-editor-modified" id="memFileMod"></div>
+            </div>
+            <div class="mem-editor-actions">
+              <span class="mem-unsaved" id="memUnsaved" style="display:none">Unsaved changes</span>
+              <button class="mem-toggle-btn active" id="memPreviewBtn" onclick="memSetMode('preview')">Preview</button>
+              <button class="mem-toggle-btn" id="memEditBtn" onclick="memSetMode('edit')">Edit</button>
+              <button class="mem-save-btn" id="memSaveBtn" onclick="memSave()" disabled>Save</button>
+            </div>
+          </div>
+          <div class="mem-editor-body">
+            <div class="mem-preview" id="memPreview"></div>
+            <textarea class="mem-textarea" id="memTextarea" style="display:none" placeholder="Start typing..." spellcheck="false"></textarea>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -374,10 +428,11 @@ function cronType(name){const n=(name||'').toLowerCase();if(n.includes('scraper'
 let currentPanel='tasks';
 let STATE={};
 
-const panelTitles={tasks:'Tasks Board',calendar:'Calendar',memory:'Activity Log',office:'The Office',team:'Meet the Team',projects:'Projects',runs:'Recent Runs'};
+const panelTitles={tasks:'Tasks Board',calendar:'Calendar',memory:'Memory Files',office:'The Office',team:'Meet the Team',projects:'Projects',runs:'Recent Runs'};
 
 function switchPanel(id){
   currentPanel=id;
+  if(id==='memory')memFilesLoaded=false;
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active',n.dataset.panel===id));
   document.querySelectorAll('.panel-view').forEach(p=>p.classList.toggle('active',p.id==='panel-'+id));
   document.getElementById('panelTitle').textContent=panelTitles[id]||id;
@@ -482,43 +537,172 @@ function renderCalendar(S){
   document.getElementById('calendarContent').innerHTML=h;
 }
 
-/* === MEMORY (Activity Log) === */
+/* === MEMORY FILE EXPLORER === */
+let memFiles=[];
+let memActiveFile=null;
+let memOrigContent='';
+let memMode='preview'; // 'preview' or 'edit'
+let memFilesLoaded=false;
+
 function renderMemory(S){
-  const logs=(S.activity_log||[]).slice(-200).reverse();
-  // Count by level
-  const counts={info:0,warn:0,error:0};
-  for(const e of logs)counts[e.level||'info']=(counts[e.level||'info']||0)+1;
-
-  let sb='<h4>Long Term Memory</h4>';
-  sb+='<div class="mem-cat active" onclick="filterLogs(\'all\')">All Entries <span class="mem-count">'+logs.length+'</span></div>';
-  sb+='<div class="mem-cat" onclick="filterLogs(\'info\')">Info <span class="mem-count">'+counts.info+'</span></div>';
-  sb+='<div class="mem-cat" onclick="filterLogs(\'warn\')">Warnings <span class="mem-count">'+counts.warn+'</span></div>';
-  sb+='<div class="mem-cat" onclick="filterLogs(\'error\')">Errors <span class="mem-count">'+counts.error+'</span></div>';
-  document.getElementById('memorySidebar').innerHTML=sb;
-
-  let h='<input class="memory-search" placeholder="Search activity log..." oninput="searchLogs(this.value)"/>';
-  if(!logs.length)h+='<div class="empty-state">No activity recorded</div>';
-  for(const e of logs){
-    const lvl=e.level||'info';
-    const lb=lvl==='error'?'badge-red':lvl==='warn'?'badge-yellow':'badge-purple';
-    h+='<div class="log-entry" data-level="'+esc(lvl)+'" onclick="this.classList.toggle(\'open\')"><div class="log-header"><span class="log-ts">'+esc(e.timestamp)+'</span><span class="badge '+lb+'">'+esc(lvl.toUpperCase())+'</span></div><div class="log-msg">'+esc(e.message)+'</div><div class="log-expanded">'+esc(JSON.stringify(e,null,2))+'</div></div>'}
-  document.getElementById('memoryMain').innerHTML=h;
+  if(!memFilesLoaded){memFilesLoaded=true;memLoadFiles()}
 }
 
-function filterLogs(level){
-  document.querySelectorAll('.mem-cat').forEach(c=>c.classList.remove('active'));
-  event.target.classList.add('active');
-  document.querySelectorAll('#memoryMain .log-entry').forEach(e=>{
-    if(level==='all')e.style.display='';
-    else e.style.display=e.dataset.level===level?'':'none';
+function memLoadFiles(){
+  fetch('/memory/files').then(r=>r.json()).then(files=>{
+    memFiles=files;
+    const core=files.filter(f=>f.category==='core');
+    const daily=files.filter(f=>f.category==='daily');
+    let ch='';
+    for(const f of core){
+      const active=memActiveFile&&memActiveFile.path===f.path?' active':'';
+      ch+='<div class="mem-file'+active+'" onclick="memOpen(\''+esc(f.path)+'\')" data-path="'+esc(f.path)+'">';
+      ch+='<svg class="mem-file-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14,2 14,8 20,8"/></svg>';
+      ch+='<div class="mem-file-info"><div class="mem-file-name">'+esc(f.name)+'</div><div class="mem-file-meta">'+esc(f.modified)+'</div></div>';
+      ch+='<span class="mem-file-size">'+memFmtSize(f.size)+'</span></div>';
+    }
+    document.getElementById('memCoreFiles').innerHTML=ch||'<div style="padding:8px 14px;font-size:10px;color:var(--muted)">No core files found</div>';
+
+    let dh='';
+    for(const f of daily){
+      const active=memActiveFile&&memActiveFile.path===f.path?' active':'';
+      dh+='<div class="mem-file'+active+'" onclick="memOpen(\''+esc(f.path)+'\')" data-path="'+esc(f.path)+'">';
+      dh+='<svg class="mem-file-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>';
+      dh+='<div class="mem-file-info"><div class="mem-file-name">'+esc(f.name)+'</div><div class="mem-file-meta">'+esc(f.relative_date||f.modified)+'</div></div>';
+      dh+='<span class="mem-file-size">'+memFmtSize(f.size)+'</span></div>';
+    }
+    document.getElementById('memDailyFiles').innerHTML=dh||'<div style="padding:8px 14px;font-size:10px;color:var(--muted)">No daily notes</div>';
+  }).catch(()=>{});
+}
+
+function memFmtSize(bytes){
+  if(bytes==null)return'\u2014';
+  if(bytes<1024)return bytes+'B';
+  if(bytes<1048576)return(bytes/1024).toFixed(1)+'K';
+  return(bytes/1048576).toFixed(1)+'M';
+}
+
+function memOpen(path){
+  const f=memFiles.find(x=>x.path===path);
+  if(!f)return;
+  memActiveFile=f;
+  // Highlight in sidebar
+  document.querySelectorAll('.mem-file').forEach(el=>el.classList.toggle('active',el.dataset.path===path));
+  // Show editor
+  document.getElementById('memEmptyState').style.display='none';
+  const wrap=document.getElementById('memEditorWrap');
+  wrap.style.display='flex';
+  document.getElementById('memFileName').textContent=f.name;
+  document.getElementById('memFileMod').textContent='Modified: '+f.modified;
+
+  fetch('/memory/file?path='+encodeURIComponent(path)).then(r=>r.text()).then(content=>{
+    memOrigContent=content;
+    document.getElementById('memTextarea').value=content;
+    memRenderPreview(content);
+    memSetMode('preview');
+    memCheckUnsaved();
+  }).catch(()=>{
+    memOrigContent='';
+    document.getElementById('memTextarea').value='Error loading file';
+    document.getElementById('memPreview').innerHTML='<div style="color:var(--red)">Error loading file</div>';
   });
 }
-function searchLogs(q){
-  const ql=q.toLowerCase();
-  document.querySelectorAll('#memoryMain .log-entry').forEach(e=>{
-    e.style.display=e.textContent.toLowerCase().includes(ql)?'':'none';
-  });
+
+function memRenderPreview(md){
+  // Simple markdown to HTML
+  let html=esc(md);
+  // Code blocks
+  html=html.replace(/```(\w*)\n([\s\S]*?)```/g,'<pre><code>$2</code></pre>');
+  // Inline code
+  html=html.replace(/`([^`]+)`/g,'<code>$1</code>');
+  // Headers
+  html=html.replace(/^#### (.+)$/gm,'<h4>$1</h4>');
+  html=html.replace(/^### (.+)$/gm,'<h3>$1</h3>');
+  html=html.replace(/^## (.+)$/gm,'<h2>$1</h2>');
+  html=html.replace(/^# (.+)$/gm,'<h1>$1</h1>');
+  // Bold/italic
+  html=html.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>');
+  html=html.replace(/\*(.+?)\*/g,'<em>$1</em>');
+  // Blockquotes
+  html=html.replace(/^&gt; (.+)$/gm,'<blockquote>$1</blockquote>');
+  // HR
+  html=html.replace(/^---$/gm,'<hr>');
+  // Unordered lists
+  html=html.replace(/^- (.+)$/gm,'<li>$1</li>');
+  html=html.replace(/(<li>[\s\S]*?<\/li>)/g,'<ul>$1</ul>');
+  html=html.replace(/<\/ul>\s*<ul>/g,'');
+  // Links
+  html=html.replace(/\[([^\]]+)\]\(([^)]+)\)/g,'<a href="$2">$1</a>');
+  // Paragraphs - wrap remaining lines
+  html=html.replace(/\n\n/g,'</p><p>');
+  html='<p>'+html+'</p>';
+  html=html.replace(/<p>\s*(<h[1-4]>)/g,'$1');
+  html=html.replace(/(<\/h[1-4]>)\s*<\/p>/g,'$1');
+  html=html.replace(/<p>\s*(<pre>)/g,'$1');
+  html=html.replace(/(<\/pre>)\s*<\/p>/g,'$1');
+  html=html.replace(/<p>\s*(<ul>)/g,'$1');
+  html=html.replace(/(<\/ul>)\s*<\/p>/g,'$1');
+  html=html.replace(/<p>\s*(<hr>)\s*<\/p>/g,'$1');
+  html=html.replace(/<p>\s*(<blockquote>)/g,'$1');
+  html=html.replace(/(<\/blockquote>)\s*<\/p>/g,'$1');
+  html=html.replace(/<p>\s*<\/p>/g,'');
+  document.getElementById('memPreview').innerHTML=html;
 }
+
+function memSetMode(mode){
+  memMode=mode;
+  const ta=document.getElementById('memTextarea');
+  const pv=document.getElementById('memPreview');
+  const preBtn=document.getElementById('memPreviewBtn');
+  const edBtn=document.getElementById('memEditBtn');
+  if(mode==='edit'){
+    ta.style.display='block';pv.style.display='none';
+    preBtn.classList.remove('active');edBtn.classList.add('active');
+    ta.focus();
+  } else {
+    ta.style.display='none';pv.style.display='block';
+    preBtn.classList.add('active');edBtn.classList.remove('active');
+    memRenderPreview(ta.value);
+  }
+}
+
+function memCheckUnsaved(){
+  const ta=document.getElementById('memTextarea');
+  const changed=ta.value!==memOrigContent;
+  document.getElementById('memUnsaved').style.display=changed?'inline':'none';
+  document.getElementById('memSaveBtn').disabled=!changed;
+}
+
+function memSave(){
+  if(!memActiveFile)return;
+  const btn=document.getElementById('memSaveBtn');
+  const content=document.getElementById('memTextarea').value;
+  btn.disabled=true;btn.textContent='Saving...';
+  fetch('/memory/file',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:memActiveFile.path,content:content})})
+  .then(r=>r.json()).then(d=>{
+    if(d.ok){
+      memOrigContent=content;
+      btn.textContent='Saved \u2713';btn.classList.add('saved');
+      memCheckUnsaved();
+      memLoadFiles(); // refresh sidebar
+      setTimeout(()=>{btn.textContent='Save';btn.classList.remove('saved');memCheckUnsaved()},2000);
+    } else {
+      btn.textContent='Error!';
+      setTimeout(()=>{btn.textContent='Save';btn.disabled=false},2000);
+    }
+  }).catch(()=>{btn.textContent='Error!';setTimeout(()=>{btn.textContent='Save';btn.disabled=false},2000)});
+}
+
+// Cmd+S / Ctrl+S to save
+document.addEventListener('keydown',function(e){
+  if((e.metaKey||e.ctrlKey)&&e.key==='s'&&currentPanel==='memory'){
+    e.preventDefault();
+    if(!document.getElementById('memSaveBtn').disabled)memSave();
+  }
+});
+
+// Track unsaved changes
+document.getElementById('memTextarea').addEventListener('input',memCheckUnsaved);
 
 /* === OFFICE === */
 function renderOffice(S){
@@ -696,6 +880,67 @@ setInterval(()=>{if(currentPanel==='calendar')renderCalendar(STATE)},30000);
 </html>"""
 
 
+WORKSPACE = Path.home() / ".openclaw" / "workspace"
+CORE_FILES = ["MEMORY.md", "SOUL.md", "AGENTS.md", "USER.md", "HEARTBEAT.md", "IDENTITY.md", "TOOLS.md"]
+
+
+def scan_memory_files() -> list:
+    """Scan workspace for memory files and return metadata."""
+    files = []
+    today = datetime.now().date()
+
+    # Core files
+    for name in CORE_FILES:
+        p = WORKSPACE / name
+        if p.exists():
+            stat = p.stat()
+            mod_dt = datetime.fromtimestamp(stat.st_mtime)
+            files.append({
+                "path": str(p),
+                "name": name,
+                "size": stat.st_size,
+                "modified": mod_dt.strftime("%Y-%m-%d %H:%M"),
+                "category": "core",
+            })
+
+    # Daily notes
+    mem_dir = WORKSPACE / "memory"
+    if mem_dir.is_dir():
+        daily = sorted(mem_dir.glob("*.md"), reverse=True)
+        for p in daily:
+            stat = p.stat()
+            mod_dt = datetime.fromtimestamp(stat.st_mtime)
+            # Relative date
+            rel = ""
+            match = re.match(r"(\d{4}-\d{2}-\d{2})", p.stem)
+            if match:
+                try:
+                    file_date = datetime.strptime(match.group(1), "%Y-%m-%d").date()
+                    delta = (today - file_date).days
+                    if delta == 0:
+                        rel = "Today"
+                    elif delta == 1:
+                        rel = "Yesterday"
+                    elif delta < 7:
+                        rel = f"{delta} days ago"
+                    elif delta < 30:
+                        rel = f"{delta // 7} week{'s' if delta // 7 > 1 else ''} ago"
+                    else:
+                        rel = f"{delta // 30} month{'s' if delta // 30 > 1 else ''} ago"
+                except ValueError:
+                    pass
+            files.append({
+                "path": str(p),
+                "name": p.name,
+                "size": stat.st_size,
+                "modified": mod_dt.strftime("%Y-%m-%d %H:%M"),
+                "relative_date": rel,
+                "category": "daily",
+            })
+
+    return files
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass  # silence request logs
@@ -715,6 +960,31 @@ class Handler(BaseHTTPRequestHandler):
             state = read_state()
             self._headers(200)
             self.wfile.write(json.dumps(state, indent=2).encode())
+
+        elif self.path == "/memory/files":
+            files = scan_memory_files()
+            self._headers(200)
+            self.wfile.write(json.dumps(files, indent=2).encode())
+
+        elif self.path.startswith("/memory/file"):
+            parsed = urlparse(self.path)
+            qs = parse_qs(parsed.query)
+            fpath = qs.get("path", [None])[0]
+            if not fpath:
+                self._headers(400)
+                self.wfile.write(json.dumps({"error": "missing path param"}).encode())
+            else:
+                # Security: only allow files under workspace
+                resolved = Path(fpath).resolve()
+                if not str(resolved).startswith(str(WORKSPACE.resolve())):
+                    self._headers(403)
+                    self.wfile.write(json.dumps({"error": "access denied"}).encode())
+                elif not resolved.exists():
+                    self._headers(404, "text/plain; charset=utf-8")
+                    self.wfile.write(b"")
+                else:
+                    self._headers(200, "text/plain; charset=utf-8")
+                    self.wfile.write(resolved.read_bytes())
 
         elif self.path == "/events":
             self.send_response(200)
@@ -758,6 +1028,35 @@ class Handler(BaseHTTPRequestHandler):
             notify_sse()
             self._headers(200)
             self.wfile.write(json.dumps({"ok": True}).encode())
+
+        elif self.path == "/memory/file":
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length)
+            try:
+                data = json.loads(body)
+            except json.JSONDecodeError:
+                self._headers(400)
+                self.wfile.write(json.dumps({"error": "invalid json"}).encode())
+                return
+            fpath = data.get("path")
+            content = data.get("content", "")
+            if not fpath:
+                self._headers(400)
+                self.wfile.write(json.dumps({"error": "missing path"}).encode())
+                return
+            resolved = Path(fpath).resolve()
+            if not str(resolved).startswith(str(WORKSPACE.resolve())):
+                self._headers(403)
+                self.wfile.write(json.dumps({"error": "access denied"}).encode())
+                return
+            try:
+                resolved.parent.mkdir(parents=True, exist_ok=True)
+                resolved.write_text(content, encoding="utf-8")
+                self._headers(200)
+                self.wfile.write(json.dumps({"ok": True}).encode())
+            except Exception as e:
+                self._headers(500)
+                self.wfile.write(json.dumps({"ok": False, "error": str(e)}).encode())
 
         elif self.path == "/retry":
             # Trigger resume_worker.sh immediately
